@@ -12,6 +12,7 @@ library(missRanger)
 library(terra)
 library(sf)
 `%notin%` <- Negate(`%in%`)
+library(purrr)
 
 pheno_output <- fread("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_highsunonly_cal_pheno/tree_pheno_pointextract_polyid_all_output.csv")
 
@@ -159,5 +160,71 @@ table(mr_pheno$TreeLabel, mr_pheno_trees_predicted$predictions)
 #Other_Genus      139482     2133
 #Platanus           7974    22617
 
+# Overall accuracy is still 94%
+
 # Classification does a much better job on trees with good fits rather than those with imputed SOS and EOS values, but at least it works and is able to make a prediction
 # Alternative would be just using the lidar derived variables
+
+
+#####
+# Set it up to classify all unlabeled trees in the Bronx as Platanus or not Platanus
+
+# Read in polygons
+# get poly object ids
+tree_poly_path_full <- "/Volumes/NYC_geo/tree_polygons/tnc_2021/Trees_Centroids_Crown_Objects_2021.gdb"
+tnc_gdb_polys <- st_read(tree_poly_path_full, layer = "treeobjects_2021_nyc")
+tnc_gdb_polys$Object_ID <- seq(1,nrow(tnc_gdb_polys))
+
+# load in bronx borough
+# limit polygons to just bronx borough
+boros <- st_read("/Volumes/NYC_geo/vectors/Borough Boundaries/geo_export_da133389-a6c6-45c3-a980-14295f0e4c2f.shp")
+bronx <- boros %>% filter(boro_name == "Bronx")
+
+bronx_reproj <- st_transform(bronx, st_crs(tnc_gdb_polys))
+
+tnc_gdb_polys_bronx <- st_intersection(tnc_gdb_polys, bronx_reproj)
+
+# Read in extracted and labeled SOS and EOS data
+pheno_output <- fread("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_highsunonly_cal_pheno/tree_pheno_pointextract_polyid_all_output.csv")
+
+# Read in extracted and unlabeled polygon SOS and EOS data
+# Read in phenology data
+setwd("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_highsunonly_cal_pheno/")
+pheno_file_list <- list.files(pattern = glob2rx("trees_pheno_output_objset*point.csv")) # stored as different sets by object id
+pheno_file_all <- purrr::map_df(pheno_file_list, fread, .id = 'object_id_group') 
+
+
+# Anything that is already labeled as Platanus or another genus retains that label
+pheno_output_sublabels <- pheno_output[which(pheno_output$Year == 2018), c("Poly_ID", "genus")]
+
+tnc_gdb_polys_bronx_labeled <- merge(tnc_gdb_polys_bronx, pheno_output_sublabels, by.x = "Object_ID", by.y = "Poly_ID", all.x = TRUE)
+tnc_gdb_polys_bronx_labeled$TreeLabel <- NA
+tnc_gdb_polys_bronx_labeled$TreeLabel[!is.na(tnc_gdb_polys_bronx_labeled$genus)] <- "Other_Genus"
+tnc_gdb_polys_bronx_labeled$TreeLabel[tnc_gdb_polys_bronx_labeled$genus == "Platanus"] <- "Platanus"
+
+# Anything that is NOT already labeled as these we apply the classifier, using the rf_trees we made before
+unlabeled_ids <- tnc_gdb_polys_bronx_labeled$Object_ID[is.na(tnc_gdb_polys_bronx_labeled$TreeLabel)] # get IDs
+
+pheno_file_all_unlabeled <- pheno_file_all %>% filter(Object_ID %in% unlabeled_ids)
+tnc_poly_info_unlabeled <- tnc_gdb_polys_bronx_labeled %>% filter(Object_ID %in% unlabeled_ids) %>% st_drop_geometry()
+
+merged_poly_info <- merge(pheno_file_all_unlabeled, tnc_poly_info_unlabeled, by = "Object_ID") # this is setup to be labeled
+# convert to wide on only columns that are needed, needed Object_ID to keep unique rows and for casting back to polygon set
+merged_poly_info_ranger_df <- merged_poly_info[, c("Object_ID", "TreeLabel", "Height", "Radius", "SHAPE_Length", "SHAPE_Area", "Year", "SOS_50", "EOS_50")] %>% pivot_wider(names_from = Year, values_from = c(SOS_50, EOS_50), names_sort = TRUE, values_fill = NA)
+
+# BUT, in order to use it, need to use missRanger first to fill in the few SOS and EOS data that totally failed so the classifier can be applied (it can't work with missing values)
+miss_ranger_inputs <- merged_poly_info_ranger_df[, !names(merged_poly_info_ranger_df) %in% c("Object_ID", "TreeLabel")]
+miss_ranger_inputs <- miss_ranger_inputs %>% mutate(across(5:16, as.numeric))
+miss_ranger_output <- missRanger(miss_ranger_inputs) # this is very slow with this many data points, but it's what we've got. Could reduce the overall size to just fill with a few to make this faster, or reduce number of iterations
+
+miss_ranger_output$TreeLabel <- merged_poly_info_ranger_df$TreeLabel
+tnc_predictions <- predict(rf_trees, data = miss_ranger_output) # this is the random forest output
+
+# fill into polygons
+merged_poly_info_ranger_df$TreeLabel <- tnc_predictions$predictions
+tnc_gdb_polys_bronx_labeled$TreeLabel[which(tnc_gdb_polys_bronx_labeled$Object_ID %in% merged_poly_info_ranger_df$Object_ID)] <- as.character(merged_poly_info_ranger_df$TreeLabel)
+
+# Write out to shapefile because geodatabase is not supported by gdal in my install right now
+setwd("/Volumes/NYC_geo/tree_polygons/classifications")
+st_write(tnc_gdb_polys_bronx_labeled[,c("Object_ID", "Height", "Radius", "SHAPE_Length", "SHAPE_Area", "TreeLabel")], dsn = "platanus_bronx_class_test.shp")
+
