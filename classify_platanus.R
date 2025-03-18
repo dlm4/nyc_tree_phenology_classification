@@ -70,7 +70,8 @@ pheno_output$TreeLabel[which(pheno_output$TreeLabel != "Platanus")] <- "Other_Ge
 
 pheno_output_sub <- pheno_output %>% filter(tpconditio %in% c('Excellent', 'Good', 'Fair') & tpstructur == "Full" & R2 > 0.8)
 pheno_output_ranger_df <- pheno_output_sub[, c("TreeLabel", "Height", "Radius", "SHAPE_Length", "SHAPE_Area", "Year", "SOS_50", "EOS_50")] %>% pivot_wider(names_from = Year, values_from = c(SOS_50, EOS_50), names_sort = TRUE, values_fill = NA)
-pheno_output_ranger_df_noNA <- pheno_output_ranger_df[complete.cases(pheno_output_ranger_df),]
+cc_inds <- complete.cases(pheno_output_ranger_df)
+pheno_output_ranger_df_noNA <- pheno_output_ranger_df[cc_inds,]
 
 # to retain random samples
 set.seed(14)
@@ -86,15 +87,28 @@ val_sample <- element_ids[element_ids %notin% train_sample]
 rf_input_train <- rf_input_full[train_sample,]
 rf_input_val <- rf_input_full[val_sample,]
 
+true_cc <- which(cc_inds == TRUE)
+pheno_output_ranger_df_nottrain <- pheno_output_ranger_df[-true_cc[train_sample],] # exclude the values that were included in training
+
 # to retain rf setup
 set.seed(14)
 rf_trees <- ranger(TreeLabel ~ ., data = rf_input_train, importance = "permutation") # only works when there isn't missing data...
+
+# prediction
 trees_predicted <- predict(rf_trees, data = rf_input_val)
-pred_table <- table(rf_input_val$TreeLabel, trees_predicted$predictions)
+rf_input_val$TreeLabel_o <- paste0(as.character(rf_input_val$TreeLabel), "_o")
+pred_table <- table(rf_input_val$TreeLabel_o, trees_predicted$predictions)
+# original is rows, predictions are columns
+
+#             Other_Genus   Platanus
+#Other_Genus       12915      389
+#Platanus            906     4335
 
 val_correct <- pred_table[1,1] + pred_table[2,2]
 val_total <- sum(pred_table)
 val_acc <- val_correct/val_total # 93% accuracy for Platanus on separate validation data
+
+as.data.frame(rf_trees$variable.importance)
 
 # To fill missing values, would need to run missRanger to predict on all the values that don't exist first...
 # Or have to accept that some trees are going to be missing and cannot be labeled
@@ -127,3 +141,23 @@ val_acc <- val_correct/val_total # 93% accuracy for Platanus on separate validat
 # val_correct <- pred_table[1,1] + pred_table[2,2]
 # val_total <- sum(pred_table)
 # val_acc <- val_correct/val_total # 93% accuracy for Platanus on separate validation data
+
+#####
+
+
+# Need to impute SOS and EOS for poor fits or otherwise missing data
+# Fallback is polygon information only, no pheno
+pheno_output_ranger_df_nottrain <- pheno_output_ranger_df_nottrain %>% mutate(across(6:17, as.numeric))
+mr_pheno <- missRanger(pheno_output_ranger_df_nottrain) # this can take awhile
+# if this works OK, would need to impute all missing values first, then run classifier on it
+# will need to setup in a way to retain accuracy of the random forests used to fill gaps
+# estimates SOS and EOS dates as decimals, so might need to round for mapping (and maybe for classifying too)
+mr_pheno_trees_predicted <- predict(rf_trees, data = mr_pheno)
+
+table(mr_pheno$TreeLabel, mr_pheno_trees_predicted$predictions)
+#               Other_Genus Platanus
+#Other_Genus      139482     2133
+#Platanus           7974    22617
+
+# Classification does a much better job on trees with good fits rather than those with imputed SOS and EOS values, but at least it works and is able to make a prediction
+# Alternative would be just using the lidar derived variables
