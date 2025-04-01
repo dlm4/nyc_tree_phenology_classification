@@ -184,6 +184,8 @@ bronx_reproj <- st_transform(bronx, st_crs(tnc_gdb_polys))
 
 tnc_gdb_polys_bronx <- st_intersection(tnc_gdb_polys, bronx_reproj)
 
+# Next time, retain all the IDs for the Bronx and then use these as reference back to the full polygon map so that polygons don't get cut by borough boundaries
+
 # Read in extracted and labeled SOS and EOS data
 pheno_output <- fread("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_highsunonly_cal_pheno/tree_pheno_pointextract_polyid_all_output.csv")
 
