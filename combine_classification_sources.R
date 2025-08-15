@@ -22,8 +22,17 @@ gen_list <- c("Platanus", "Gleditsia", "Pyrus", "Quercus", "Acer", "Tilia",
               "Prunus", "Zelkova", "Ginkgo", "Styphnolobium", "Ulmus", 
               "Liquidambar", "Malus", "Robinia", "Liriodendron", "Betula", "Ailanthus", "Fraxinus")
 
+# Filter based on minimum summer NDVI threshold for all years
+setwd('/Volumes/NYC_geo/tree_mortality')
+mean_ndvi_all <- fread("mean_summer_ndvi.csv")
+ndvi_min <- 0.3 # just picked this number for now, Thapa
+#ndvi_min <- 0.5 # just picked this number for now, Alonzo
+#mean_ndvi_all_live <- mean_ndvi_all %>% filter(ndvi_2024 > ndvi_min) # accidentally tested this first, will do it the other way next
+mean_ndvi_all_live <- mean_ndvi_all %>% filter_at(vars(starts_with("ndvi")), all_vars(. > ndvi_min))
+
 # combine everything to setup an RF run like previous organization
-tree_pheno_sub <- tree_pheno %>% filter(dbh > 4 & tpstructur == "Full" & genus %in% gen_list & Poly_ID %in% unique(tree_spectra$Object_ID)) 
+#tree_pheno_sub <- tree_pheno %>% filter(dbh > 4 & tpstructur == "Full" & genus %in% gen_list & Poly_ID %in% unique(tree_spectra$Object_ID))
+tree_pheno_sub <- tree_pheno %>% filter(dbh > 4 & tpstructur == "Full" & genus %in% gen_list & Poly_ID %in% unique(tree_spectra$Object_ID) & Poly_ID %in% unique(mean_ndvi_all_live$Object_ID)) 
 
 #add in lidar variables
 lidar_vars <- tree_pheno_sub[match(tree_spectra$Object_ID, tree_pheno_sub$Poly_ID),] %>% select("Poly_ID", "Height", "Radius", "SHAPE_Length", "SHAPE_Area")
@@ -57,22 +66,29 @@ df_cls_agg_mean_lidar_pheno <- merge(df_cls_agg_mean_lidar, pheno_vars_wide_sub,
 genus_vars <- tree_pheno_sub[match(df_cls_agg_mean_lidar_pheno$Object_ID, tree_pheno_sub$Poly_ID),] %>% select("Poly_ID", "genus")
 colnames(genus_vars)[1] <- "Object_ID"
 df_cls_agg_mean_lidar_pheno <- merge(genus_vars, df_cls_agg_mean_lidar_pheno)
+
+
+# # Swap in species for Acer
+# sp_acer <- c('Acer platanoides', 'Acer rubrum', 'Acer saccharinum', 'Acer',
+#              'Acer campestre', 'Acer pseudoplatanus', 'Acer saccharum', 'Acer ginnala',
+#              'Acer palmatum', 'Acer griseum', 'Acer negundo', 'Acer x freemanii')
+# 
+# 
+# tree_pheno_sub2 <- tree_pheno_sub[match(df_cls_agg_mean_lidar_pheno$Object_ID[df_cls_agg_mean_lidar_pheno$genus == 'Acer'], tree_pheno_sub$Poly_ID)]
+# tree_pheno_sub2 <- tree_pheno_sub2 %>% filter(species %in% sp_acer)
+# sp_acer_vars <- tree_pheno_sub2[match(df_cls_agg_mean_lidar_pheno$Object_ID, tree_pheno_sub2$Poly_ID),] %>% select("Poly_ID", "species") %>% na.omit()
+# sp_acer_vars$sub_ind <- match(sp_acer_vars$Poly_ID, df_cls_agg_mean_lidar_pheno$Object_ID)
+# df_cls_agg_mean_lidar_pheno$genus <- replace(df_cls_agg_mean_lidar_pheno$genus, sp_acer_vars$sub_ind, sp_acer_vars$species)
+
+# Change to be as.factor()
 df_cls_agg_mean_lidar_pheno$genus <- as.factor(df_cls_agg_mean_lidar_pheno$genus)
 
-# this is all merged for the tree inputs for rf, might need to output because this might be too big if everything gets combined
-# table(df_cls_agg_mean_lidar_pheno$genus) %>% as.data.frame() %>%
-#   ggplot() +
-#   geom_col(aes(x = Var1, y = Freq)) +
-#   labs(x = "Genus", y = "Count") +
-#   theme_bw() +
-#   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
 
-df_cls_agg_mean_cc <- na.omit(df_cls_agg_mean_lidar_pheno) # no difference here, old code setup
 
 #####
 # Test RF
 # RF Run
-
+df_cls_agg_mean_cc <- na.omit(df_cls_agg_mean_lidar_pheno) # do this cleaning just for prep
 
 set.seed(14)
 train_index <- sample(1:nrow(df_cls_agg_mean_cc), round(0.8*nrow(df_cls_agg_mean_cc), 0))
@@ -93,9 +109,7 @@ test_data_noid <- test_data %>% select(!Object_ID) # %>% as.data.frame()
 # Also need to consider rebalancing class levels using SMOTE or some other rebalancing algorithm
 # Should also measure runtime for ranger model run
 
-# <20 minutes with 500 trees and 2 cores
-# trying 1000 trees with 8 cores, didn't improve accuracy
-# trying 2000 trees with 10 cores just for completeness
+# <20 minutes with 500 trees
 rf_model <- ranger(genus ~ ., train_data_noid, importance = "impurity", num.trees = 500, num.threads = 10)
 #rf_model <- ranger(genus ~ ., train_data_noid, importance = "permutation", local.importance = TRUE) # Doing local variable importance, trying to see what is driving each tree class
 p_rf <- predict(rf_model, test_data_noid[,2:ncol(test_data_noid)])
@@ -129,7 +143,7 @@ ggplot(cm_results) +
   theme_bw()
 
 #####
-# Try an xgboost run?
+# Try an xgboost run
 set.seed(14)
 
 # test on a much smaller sample, will need to try to scale this up if we want to use this.
@@ -160,36 +174,43 @@ xgb_params <- list("objective" = "multi:softprob",
                    "num_class" = numberOfClasses,
                    "nthread" = 8)
 nround    <- 50 # number of XGBoost rounds
+esr <- 10 # early stopping rounds, need to figure out how to use this
 cv.nfold  <- 5
 
 # Fit cv.nfold * cv.nround XGB models and save OOF predictions
 # try with verbose?
+# start_time <- Sys.time()
+# cv_model <- xgb.cv(params = xgb_params,
+#                    data = train_matrix,
+#                    nrounds = nround,
+#                    nfold = cv.nfold,
+#                    verbose = TRUE,
+#                    prediction = TRUE)
+# t_dif <- Sys.time() - start_time
+# print(t_dif) # 8.4 hours to run...
+# 
+# OOF_prediction <- data.frame(cv_model$pred) %>%
+#   mutate(max_prob = max.col(., ties.method = "last"),
+#          label = train_data_noid$genus + 1)
+# head(OOF_prediction)
+# # confusion matrix
+# confusionMatrix(factor(OOF_prediction$max_prob),
+#                 factor(OOF_prediction$label),
+#                 mode = "everything")
+# 
+# xgb_impcv <- xgb.importance(model = cv_model)
+# 
+# ggplot(xgb_impcv[1:25,]) +
+#   geom_col(aes(x = Gain, y = fct_reorder(Feature, Gain))) +
+#   labs(x = "Gain", y = "Variable", title = "Top 25 most important variables")
+
+
+wl <- list(train = train_matrix, eval = test_matrix) # sometimes crashes and R aborts with a watchlist, didn't happen before
 start_time <- Sys.time()
-cv_model <- xgb.cv(params = xgb_params,
-                   data = train_matrix,
-                   nrounds = nround,
-                   nfold = cv.nfold,
-                   verbose = TRUE,
-                   prediction = TRUE)
+#bst_model <- xgb.train(params = xgb_params, data = train_matrix, nrounds = nround)
+bst_model <- xgb.train(params = xgb_params, data = train_matrix, nrounds = nround, watchlist = wl, verbose = TRUE, early_stopping_rounds = esr) # added verbose setting and early_stopping_rounds = 10
 t_dif <- Sys.time() - start_time
-print(t_dif) # 8.4 hours to run...
-
-OOF_prediction <- data.frame(cv_model$pred) %>%
-  mutate(max_prob = max.col(., ties.method = "last"),
-         label = train_data_noid$genus + 1)
-head(OOF_prediction)
-# confusion matrix
-confusionMatrix(factor(OOF_prediction$max_prob),
-                factor(OOF_prediction$label),
-                mode = "everything")
-
-xgb_impcv <- xgb.importance(model = cv_model)
-
-ggplot(xgb_impcv[1:25,]) +
-  geom_col(aes(x = Gain, y = fct_reorder(Feature, Gain))) +
-  labs(x = "Gain", y = "Variable", title = "Top 25 most important variables")
-
-bst_model <- xgb.train(params = xgb_params, data = train_matrix, nrounds = nround)
+print(t_dif)
 
 # Predict hold-out test set
 test_pred <- predict(bst_model, newdata = test_matrix)
@@ -212,6 +233,7 @@ ggplot(xgb_imp[1:25,]) +
   geom_col(aes(x = Gain, y = fct_reorder(Feature, Gain))) +
   labs(x = "Gain", y = "Variable", title = "Top 25 most important variables")
 
+#
 xgb_cm <- confusionMatrix(factor(test_prediction$max_prob),
                           factor(test_prediction$label),
                           mode = "everything")
