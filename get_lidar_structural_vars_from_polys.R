@@ -6,14 +6,14 @@
 
 # Set of structural variables, mostly all selected variables from Alonzo et al 2014
 
-# Max crown height, see what we get as a sanity check to the TNC data, good to have anyway
-# Median height of returns in crown
-# Crown width at median height of returns in crown
-# Ratio of crown height to width: median height
-# Average intensity below median height
+# Y: Max crown height, see what we get as a sanity check to the TNC data, good to have anyway
+# Y: Median height of returns in crown
+# Y: Crown width at median height of returns in crown
+# Y: Ratio of crown height to width: median height
+# Y: Average intensity below median height
 # Crown surface intensity: 0.5* m spatial resolution (doing it a little coarser because we have lower points/m2)
 # Surface heights (0.5* m)/surface heights (1 m)
-# Count of returns in 0.5 m vertical slice at 90th percentile divided by width at that height
+# Y: Count of returns in 0.5 m vertical slice at 90th percentile divided by width at that height
 
 #####
 
@@ -160,6 +160,11 @@ fCP3circle <- function(x, y, z){
 }
 
 # Need to figure out the surface metrics next... not sure how to do those yet, voxels??
+# Crown surface intensity
+
+# Get first return vegetation points
+# Voxelize_points at resolution
+# get the average intensity
 
 # Wrapper for all structural metric functions
 calcMetrics = function(x, y, z, i){
@@ -171,10 +176,53 @@ calcMetrics = function(x, y, z, i){
        w_1_circle = fW1widthcircle(x,y,z),
        hw_rat_2 = fHWrat2(x,y,z),
        cp_3_circle = fCP3circle(x,y,z))
-  }
+}
+
+calcMetricsSet2 = function(x, y, z, i){
+  list(crown_surf_intensity = mean(i),
+       crown_surf_height05 = max(z))
+}
+
+calcMetricsSet3 = function(x, y, z, i){
+  list(crown_surf_height1 = max(z))
+}
+
+# CHATGPT for handling empty voxels
+safe_plot_metrics <- function(las, func, polygons) {
+  results <- lapply(seq_len(nrow(polygons)), function(i) {
+    clipped <- clip_roi(las, polygons[i, ])
+    
+    if (inherits(clipped, "LAS") && npoints(clipped) > 0) {
+      # Call plot_metrics on the single polygon
+      plot_metrics(clipped, polygons[i, ], func)
+    } else {
+      # Empty polygon: return NA for the metric
+      # We create a one-row data.frame with NA, preserving polygon attributes
+      na_df <- as.data.frame(lapply(func, function(x) NA_real_))
+      cbind(st_drop_geometry(polygons[i, ]), na_df)
+    }
+  })
+  
+  # Combine all polygon results into one data.frame
+  do.call(rbind, results)
+}
+
 
 # appends onto existing sfc_POLYGONS file
 tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height, calcMetrics(X, Y, Z, Intensity), tnc_gdb_polys_sub_sfc)
+las_veg_height_surf_vox05 <- voxelize_points(las_veg_height, 1.64) # don't need first return filter because we're doing max anyway
+las_veg_height_surf_vox1 <- voxelize_points(las_veg_height, 3.28)
+
+#tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox05, calcMetricsSet2(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
+#tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
+
+tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox05, calcMetricsSet2(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
+tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
+
+test1 <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
+
+
+m1 <- clip_roi(las_veg_height_surf_vox1, tnc_gdb_polys_sub_sfc)
 
 ggplot(tnc_gdb_polys_sub_metrics) +
   geom_point(aes(x = median, y = max)) +
