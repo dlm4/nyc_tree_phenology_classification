@@ -180,49 +180,29 @@ calcMetrics = function(x, y, z, i){
 
 calcMetricsSet2 = function(x, y, z, i){
   list(crown_surf_intensity = mean(i),
-       crown_surf_height05 = max(z))
+       crown_surf_height05 = mean(z))
 }
 
-calcMetricsSet3 = function(x, y, z, i){
-  list(crown_surf_height1 = max(z))
+calcMetricsSet3 = function(z){
+  list(crown_surf_height1 = mean(z))
 }
-
-# CHATGPT for handling empty voxels
-safe_plot_metrics <- function(las, func, polygons) {
-  results <- lapply(seq_len(nrow(polygons)), function(i) {
-    clipped <- clip_roi(las, polygons[i, ])
-    
-    if (inherits(clipped, "LAS") && npoints(clipped) > 0) {
-      # Call plot_metrics on the single polygon
-      plot_metrics(clipped, polygons[i, ], func)
-    } else {
-      # Empty polygon: return NA for the metric
-      # We create a one-row data.frame with NA, preserving polygon attributes
-      na_df <- as.data.frame(lapply(func, function(x) NA_real_))
-      cbind(st_drop_geometry(polygons[i, ]), na_df)
-    }
-  })
-  
-  # Combine all polygon results into one data.frame
-  do.call(rbind, results)
-}
-
 
 # appends onto existing sfc_POLYGONS file
 tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height, calcMetrics(X, Y, Z, Intensity), tnc_gdb_polys_sub_sfc)
 las_veg_height_surf_vox05 <- voxelize_points(las_veg_height, 1.64) # don't need first return filter because we're doing max anyway
-las_veg_height_surf_vox1 <- voxelize_points(las_veg_height, 3.28)
+las_veg_height_surf_vox1 <- voxelize_points(las_veg_height, 3.28/4)
 
 #tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox05, calcMetricsSet2(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
 #tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
 
 tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox05, calcMetricsSet2(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
-tnc_gdb_polys_sub_metrics <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
 
-test1 <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(X, Y, Z, Intensity), tnc_gdb_polys_sub_metrics)
-
-
+# this issue with the 1 m resolution is not an empty las issue, this is handled fine at 0.5 m resolution. Really not sure why this is failing then
+m05 <- clip_roi(las_veg_height_surf_vox05, tnc_gdb_polys_sub_sfc)
 m1 <- clip_roi(las_veg_height_surf_vox1, tnc_gdb_polys_sub_sfc)
+#good_poly_inds <- intersect(which(unlist(sapply(m1, nrow)) > 0), which(sapply(m1, class) == "LAS")) # get joint grouping of both
+#tnc_sub <- tnc_gdb_polys_sub_metrics[good_poly_inds,]
+test1 <- plot_metrics(las_veg_height_surf_vox1, calcMetricsSet3(Z), tnc_sub) # this still does not work even with filtering, not sure why voxelization is not working at this resolution.
 
 ggplot(tnc_gdb_polys_sub_metrics) +
   geom_point(aes(x = median, y = max)) +
