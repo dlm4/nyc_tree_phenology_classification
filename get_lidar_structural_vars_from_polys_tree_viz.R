@@ -31,6 +31,7 @@ library(sf)
 library(lidR)
 library(future)
 library(terra) # for rasters
+library(rgl) # for 3D movie
 # Note! : terra masks from lidR, need to call with lidR:: area, crs, crs <-, is.empty, watershed
 
 #####
@@ -168,9 +169,13 @@ rast_test <- rast(terrain_raster_tile_list[which(tile_ids == tile_polys$LAS_ID[i
 tnc_gdb_polys_reproj <- st_transform(tnc_gdb_polys, st_crs(rast_test))
 tnc_gdb_polys_reproj_centroid <- st_centroid(tnc_gdb_polys_reproj)
 
+# doing visualization for tree poly id 82003 which is in las tile 25260
+i <- which(tile_polys$LAS_ID == "25260")
+
+
 #####
 # Set new i and loop here
-for (i in 101:1702){
+#for (i in 101:1702){
   print(i)
   start_time <- Sys.time()
   
@@ -180,7 +185,7 @@ for (i in 101:1702){
   st_crs(rast_tile_extent) <- st_crs(rast_test)
   tnc_gdb_polys_reproj_centroid_sub <- st_intersection(tnc_gdb_polys_reproj_centroid, rast_tile_extent)
   
-  if (nrow(tnc_gdb_polys_reproj_centroid_sub) > 0){
+  #if (nrow(tnc_gdb_polys_reproj_centroid_sub) > 0){
     
     # Get all relevant neighboring LAS tiles to deal with trees on edges
     selected_tile <- tile_polys[i,]
@@ -206,7 +211,7 @@ for (i in 101:1702){
     
     # remove ground for veg height
     las_veg_height <- las - terrain_raster_sub
-    rm(las)
+    #rm(las)
     
     # Get polygon subset from relevant centroids
     tnc_gdb_polys_reproj_sub <- tnc_gdb_polys_reproj[which(tnc_gdb_polys_reproj$Poly_ID %in% tnc_gdb_polys_reproj_centroid_sub$Poly_ID),]
@@ -215,34 +220,81 @@ for (i in 101:1702){
     las_veg_height_mask <- classify_poi(las_veg_height, as.integer(1), roi = tnc_gdb_polys_reproj_sub, inverse_roi = TRUE)
     las_veg_height_inpoly <- filter_poi(las_veg_height_mask, Classification %in% pts_classes) # this removes all the points that are not within polygons
     # if this is empty, then no tree points within the remaining las, and this won't work
-    if (!lidR::is.empty(las_veg_height_inpoly)){
+    #if (!lidR::is.empty(las_veg_height_inpoly)){
       las_veg_height_inpoly_labeled <- merge_spatial(las_veg_height_inpoly, tnc_gdb_polys_reproj_sub, attribute = "Poly_ID")
+      
+      # New plotting here
+      
+      plot(las_veg_height_inpoly_labeled, color = "Z")
+      
+      # One tree
+      las_veg_height_inpoly_labeled_1tree <- filter_poi(las_veg_height_inpoly_labeled, Poly_ID == 82003)
+      plot(las_veg_height_inpoly_labeled_1tree, color = "Z")
+      plot(las_veg_height_inpoly_labeled_1tree, color = "Intensity")
+      
+      setwd("/Volumes/NYC_geo/nyc_lidar_metrics")
+      # https://stackoverflow.com/questions/64046462/making-nice-gif-from-lidar-point-cloud-with-r-using-lidr-package
+      exportPath <- "/Volumes/NYC_geo/nyc_lidar_metrics/tree_id_82003_rotate_white"
+      plot(las_veg_height_inpoly_labeled_1tree, color = "Z", bg = "white")
+      movie3d(spin3d(), duration = 12, movie = exportPath) # spin3d is 5 rpm
+      
+      
+      max_height <- max(las_veg_height_inpoly_labeled_1tree$Z)
+      med_height <- median(las_veg_height_inpoly_labeled_1tree$Z)
+      
+      ggplot(las_veg_height_inpoly_labeled_1tree@data) +
+        geom_point(aes(x = X/3.28, y = Z/3.28, color = Y/3.28), size = 1) +
+        scale_color_gradientn(colors = c("green", "forestgreen", "darkgreen")) +
+        geom_hline(yintercept = max_height/3.28, linetype = "dotted") +
+        geom_hline(yintercept = med_height/3.28, linetype = "dashed") +
+        scale_y_continuous(limits = c(0, 15)) +
+        labs (x = "Longitude (m)", y = "Height (m)", color = "Latitude (m)") +
+        coord_equal()
+      #ggsave("tree_height_points_xlon_poly_id_82003.png", width = 6, height = 4, units = "in")
+      
+      ggplot(las_veg_height_inpoly_labeled_1tree@data) +
+        geom_point(aes(x = Y/3.28, y = Z/3.28, color = X/3.28), size = 1) +
+        scale_color_gradientn(colors = c("green", "forestgreen", "darkgreen")) +
+        geom_hline(yintercept = max_height/3.28, linetype = "dotted") +
+        geom_hline(yintercept = med_height/3.28, linetype = "dashed") +
+        scale_y_continuous(limits = c(0, 15)) +
+        labs (x = "Latitude (m)", y = "Height (m)", color = "Longitude (m)") +
+        coord_equal()
+      #ggsave("tree_height_points_xlat_poly_id_82003.png", width = 6, height = 4, units = "in")
+      
+      ggplot(las_veg_height_inpoly_labeled_1tree@data) +
+        geom_point(aes(x = Y, y = Z, color = X))
+      
+      ggplot(las_veg_height_inpoly_labeled_1tree@data) +
+        geom_point(aes(x = Y, y = Z, color = Intensity))
+      
+      
       
       # Calculate crown metrics and strip geometry
       tnc_metrics_sub <- crown_metrics(las_veg_height_inpoly_labeled, ~calcMetrics(X, Y, Z, Intensity), attribute = "Poly_ID") %>% st_drop_geometry()
       # Can redo this without droppping geometry if we want to view it as a shapefile (for example)
       
       # Write out metrics
-      setwd('/Volumes/NYC_geo/nyc_lidar_metrics/crown_metrics')
-      metric_output_filename <- paste0("nyc_crown_metrics_tnc_polys_tile_", tile_polys$LAS_ID[i], ".csv")
-      write.csv(tnc_metrics_sub, metric_output_filename, row.names = FALSE)
+      #setwd('/Volumes/NYC_geo/nyc_lidar_metrics/crown_metrics')
+      #metric_output_filename <- paste0("nyc_crown_metrics_tnc_polys_tile_", tile_polys$LAS_ID[i], ".csv")
+      #write.csv(tnc_metrics_sub, metric_output_filename, row.names = FALSE)
       
       # remove unneeded files
       rm(las_veg_height)
       rm(las_veg_height_inpoly)
       rm(las_veg_height_inpoly_labeled)
       rm(las_veg_height_mask)
-    } else {
-      print(paste0("No vegetation points in LAS for tree polygons: tile ", tile_polys$LAS_ID[i]))
-    }
-    end_time <- Sys.time()
-    print(end_time - start_time)
+    #} else {
+     # print(paste0("No vegetation points in LAS for tree polygons: tile ", tile_polys$LAS_ID[i]))
+    #}
+    #end_time <- Sys.time()
+    #print(end_time - start_time)
    
-  } else {
-    print(paste0("No tree polygons found in LAS: tile ", tile_polys$LAS_ID[i]))
-  }
+  #} else {
+    #print(paste0("No tree polygons found in LAS: tile ", tile_polys$LAS_ID[i]))
+  #}
   # could include an else statement to write out a little file if no polygons were found in the intersection
-}
+#}
 
 # Take screenshots of these steps to include in presentation (like for AGU)
 # Something pretty
@@ -250,17 +302,17 @@ for (i in 101:1702){
 # 3D View, colored by tree factor by angle
 # Flythrough would be cool
 
-#####
-
-# Update shapefile with files that that been completed
-
-full_tile_polys <- read_sf("/Volumes/DLM_backup/lidar_2021/NYC_2021/NYC2021_LAS_Index.shp")
-
-setwd('/Volumes/NYC_geo/nyc_lidar_metrics/crown_metrics')
-completed_tile_list <- list.files(pattern = glob2rx("nyc_crown_metrics_tnc_polys_tile_*.csv"))
-completed_tile_ids <- sapply(completed_tile_list, function(x) unlist(strsplit(substr(x, 34, 500), "[.]"))[1])
-
-full_tile_polys$completed <- "N"
-full_tile_polys$completed[which(full_tile_polys$LAS_ID %in% completed_tile_ids)] <- "Y"
-
-st_write(full_tile_polys, "../las_crown_metric_processing_completion4.shp")
+# #####
+# 
+# # Update shapefile with files that that been completed
+# 
+# full_tile_polys <- read_sf("/Volumes/DLM_backup/lidar_2021/NYC_2021/NYC2021_LAS_Index.shp")
+# 
+# setwd('/Volumes/NYC_geo/nyc_lidar_metrics/crown_metrics')
+# completed_tile_list <- list.files(pattern = glob2rx("nyc_crown_metrics_tnc_polys_tile_*.csv"))
+# completed_tile_ids <- sapply(completed_tile_list, function(x) unlist(strsplit(substr(x, 34, 500), "[.]"))[1])
+# 
+# full_tile_polys$completed <- "N"
+# full_tile_polys$completed[which(full_tile_polys$LAS_ID %in% completed_tile_ids)] <- "Y"
+# 
+# st_write(full_tile_polys, "../las_crown_metric_processing_completion4.shp")
