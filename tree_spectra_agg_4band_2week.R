@@ -93,8 +93,7 @@ stepsize <- 2000
 top <- floor(length(tree_ids)/stepsize)*stepsize+1
 step_ranges <- seq(1, top, stepsize)
 
-#for (idset in 1:length(step_ranges)){
-for (idset in 11:length(step_ranges)){
+for (idset in 1:length(step_ranges)){
   start_time <- Sys.time()
   range_min <- step_ranges[idset]
   idset_range <- seq(range_min, range_min + stepsize - 1)
@@ -113,7 +112,7 @@ for (idset in 11:length(step_ranges)){
   for (i in 1:nrow(date_ranges)){
     # get rows within each date range, and assign a number based on the row from the date_ranges file df (as a reference)
     tree_id_spectra$in_date_range[which(ymd(tree_id_spectra$date) %within% interval(date_ranges$start_date[i], date_ranges$end_date[i]))] <- i
-  }
+  } # 884193 for idset 1
   
   tree_id_spectra <- na.omit(tree_id_spectra) # drop the non-included dates
   tree_id_spectra <- as.data.frame(tree_id_spectra)
@@ -179,13 +178,14 @@ for (idset in 11:length(step_ranges)){
   }
   
   # make long, append date_range_group and band type, make wide again
+  # This is where the NA error appears, but this is because some trees are still missing 2 week windows, so maybe I messed up some indexing earlier??
   df_spectra_omnbr_zscaled_long <- df_spectra_omnbr_zscaled %>% pivot_longer(cols = colnames(df_spectra_omnbr_zscaled)[3:ncol(df_spectra_omnbr_zscaled)])
   df_spectra_omnbr_zscaled_long <- df_spectra_omnbr_zscaled_long %>% mutate(name_drg = paste0(name, "_mean_", Date_Range_Group))
   df_spectra_omnbr_zscaled_wide <- df_spectra_omnbr_zscaled_long %>% pivot_wider(id_cols = c(Object_ID), names_from = name_drg, values_from = value)
   
   df_spectra_omnbr_long <- df_spectra_omnbr %>% pivot_longer(cols = colnames(df_spectra_omnbr)[3:ncol(df_spectra_omnbr)])
-  df_spectra_omnbr_long <- df_spectra_omnbr_long %>% mutate(name_month = paste0(name, "_mean_", Date_Range_Group))
-  df_spectra_omnbr_wide <- df_spectra_omnbr_long %>% pivot_wider(id_cols = c(Object_ID), names_from = name_month, values_from = value)
+  df_spectra_omnbr_long <- df_spectra_omnbr_long %>% mutate(name_drg = paste0(name, "_mean_", Date_Range_Group))
+  df_spectra_omnbr_wide <- df_spectra_omnbr_long %>% pivot_wider(id_cols = c(Object_ID), names_from = name_drg, values_from = value)
   
   # UPDATE THESE OUTPUTS
   outpath <- "/Volumes/NYC_geo/tree_classification/extracted_4band_2week"

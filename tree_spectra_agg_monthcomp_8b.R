@@ -7,25 +7,23 @@ library(purrr)
 library(ranger)
 library(future)
 library(future.apply)
+library(sf)
 
 calcNormDif <- function(b1, b2){
   return((b1-b2)/(b1+b2))
 }
 
+# Load TNC polygons
+tree_poly_path_full <- "/Volumes/NYC_geo/tree_polygons/tnc_2021/Trees_Centroids_Crown_Objects_2021.gdb" # Note this is the FINAL TNC dataset
+tnc_gdb_polys <- st_read(tree_poly_path_full, layer = "treeobjects_2021_nyc")
+tnc_gdb_polys$Poly_ID <- 1:nrow(tnc_gdb_polys)
 
-tree_ids <- fread("/Users/dlm356/dlm356_files/nyc_trees/tree_color_sniping/tree_count_figures/tree_id_list_95pct_2week_intersect.csv")
-#date_ranges_4b <- fread("/Users/dlm356/dlm356_files/nyc_trees/tree_color_sniping/tree_count_figures/tree_id_date_ranges_95pct_2week_4b.csv")
-date_ranges_8b <- fread("/Users/dlm356/dlm356_files/nyc_trees/tree_color_sniping/tree_count_figures/tree_id_date_ranges_95pct_2week_8b.csv")
-
-date_ranges <- date_ranges_8b
-
-#tree_pheno <- fread("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_4b_highsunonly_cal_pheno/tree_pheno_pointextract_polyid_all_output_2017_2024.csv")
 
 #####
 # Prep stuff
 
 #####
-# Get imagery for all 8 bands
+# Get imagery for all 4 bands
 # Can make this more efficient to only search one Objset for a single id version - could check range before running instead of a loop?
 getTreePlanetSpectra <- function(ids_all){
   for (i in 1:7){
@@ -85,16 +83,14 @@ getTreePlanetSpectra2 <- function(ids_all){
 
 
 # get full list of tree IDs
-#tree_ids <- unique(tree_pheno$Poly_ID)
+tree_ids <- tnc_gdb_polys$Poly_ID
 
-tree_ids <- tree_ids$x
-
-stepsize <- 2000
+stepsize <- 5000
 top <- floor(length(tree_ids)/stepsize)*stepsize+1
 step_ranges <- seq(1, top, stepsize)
 
-for (idset in 1:length(step_ranges)){
-
+#for (idset in 1:length(step_ranges)){
+for (idset in 100:length(step_ranges)){  
   start_time <- Sys.time()
   range_min <- step_ranges[idset]
   idset_range <- seq(range_min, range_min + stepsize - 1)
@@ -102,22 +98,26 @@ for (idset in 1:length(step_ranges)){
   print(idset)
   
   setwd("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_8b_highsunonly_cal_extract/tree_outputs_point") # 8 b setup
+  #setwd("/Volumes/NYC_geo/Planet/tests/nyc_daily_stack_4b_highsunonly_cal_extract/tree_outputs_point") # 4 b setup
   tree_id_spectra <- getTreePlanetSpectra2(tree_ids_sub)
   
   # take mean for each month (across all years)
   tree_id_spectra$date <- ymd(tree_id_spectra$date)
   
   # drop tree ids dates not in the date range, and define which row in the date_ranges 
-  tree_id_spectra$in_date_range <- NA
-  for (i in 1:nrow(date_ranges)){
-    # get rows within each date range, and assign a number based on the row from the date_ranges file df (as a reference)
-    tree_id_spectra$in_date_range[which(ymd(tree_id_spectra$date) %within% interval(date_ranges$start_date[i], date_ranges$end_date[i]))] <- i
-  }
+  #tree_id_spectra$in_date_range <- NA
+  tree_id_spectra$in_date_range <- month(tree_id_spectra$date) # months
+  
+  # Keep only 2018:2024 dates, 2017 is spotty in the beginning of the year for 4band
+  #tree_id_spectra$in_date_range[which(year(tree_id_spectra$date) %notin% 2018:2024)] <- NA
+  # Keep only 2021:2024 for 8 band for similar reasons
+  tree_id_spectra$in_date_range[which(year(tree_id_spectra$date) %notin% 2021:2024)] <- NA
   
   tree_id_spectra <- na.omit(tree_id_spectra) # drop the non-included dates
   tree_id_spectra <- as.data.frame(tree_id_spectra)
   # Do 2 week range averaging, then do band combinations, then do Z-scaling
   band_list <- c("coastal_blue", "blue", "green_i", "green", "yellow", "red", "rededge", "nir")
+  #band_list <- c("blue", "green", "red", "nir")
   tree_id_spectra_date_range_mean <- aggregate(tree_id_spectra[,band_list], by = list(tree_id_spectra$in_date_range, tree_id_spectra$Object_ID), FUN = "mean", na.rm = TRUE)
   colnames(tree_id_spectra_date_range_mean)[1:2] <- c("Date_Range_Group", "Object_ID")
   # would need to add the date back into the date_range_group
@@ -125,9 +125,6 @@ for (idset in 1:length(step_ranges)){
   #####
   # OMNBR step (all band combinations, not true omnbr but would be a setup step)
   
-  #tree_id_spectra <- as.data.frame(tree_id_spectra)
-  
-  #band_list <- c("coastal_blue", "blue", "green_i", "green", "yellow", "red", "rededge", "nir")
   colname_list <- c()
   
   for (i in 1:(length(band_list)-1)){
@@ -141,8 +138,6 @@ for (idset in 1:length(step_ranges)){
       
       colname_list <- c(colname_list, band_name)
       
-      #nd_index <- calcNormDif(tree_df[,b2], tree_df[,b1]) # note this only works on data frames, not tibbles
-      #nd_index <- calcNormDif(tree_id_spectra[,b2], tree_id_spectra[,b1]) # note this only works on data frames, not tibbles
       nd_index <- calcNormDif(tree_id_spectra_date_range_mean[,b2], tree_id_spectra_date_range_mean[,b1]) # note this only works on data frames, not tibbles
       
       if (i == 1 & j == 2){
@@ -155,19 +150,7 @@ for (idset in 1:length(step_ranges)){
     }
   }
   
-  #df_spectra_omnbr <- bind_cols(tree_df, omnbr)
   df_spectra_omnbr <- bind_cols(tree_id_spectra_date_range_mean, omnbr)
-  
-  subDateChar <- function(i){
-    return(gsub("-", "", as.character(date_ranges$start_date[i])))
-  }
-  # replace numbers with actual dates (as character)
-  df_spectra_omnbr$Date_Range_Group <- sapply(df_spectra_omnbr$Date_Range_Group, FUN = subDateChar)
-  
-  
-  # df_spectra_omnbr_zscaled %>% filter(Object_ID == 547) %>%
-  #   ggplot() +
-  #   geom_histogram(aes(nd_nir_red_zscaled))
   
   #####
   # Need to do z-scaling here
@@ -188,16 +171,18 @@ for (idset in 1:length(step_ranges)){
   df_spectra_omnbr_zscaled_wide <- df_spectra_omnbr_zscaled_long %>% pivot_wider(id_cols = c(Object_ID), names_from = name_drg, values_from = value)
   
   df_spectra_omnbr_long <- df_spectra_omnbr %>% pivot_longer(cols = colnames(df_spectra_omnbr)[3:ncol(df_spectra_omnbr)])
-  df_spectra_omnbr_long <- df_spectra_omnbr_long %>% mutate(name_month = paste0(name, "_mean_", Date_Range_Group))
-  df_spectra_omnbr_wide <- df_spectra_omnbr_long %>% pivot_wider(id_cols = c(Object_ID), names_from = name_month, values_from = value)
+  df_spectra_omnbr_long <- df_spectra_omnbr_long %>% mutate(name_drg = paste0(name, "_mean_", Date_Range_Group))
+  df_spectra_omnbr_wide <- df_spectra_omnbr_long %>% pivot_wider(id_cols = c(Object_ID), names_from = name_drg, values_from = value)
+  
+  # Do the filling with the full data set later?
   
   # UPDATE THESE OUTPUTS
-  outpath <- "/Volumes/NYC_geo/tree_classification/extracted_8band_2week"
+  outpath <- "/Volumes/NYC_geo/tree_classification/extracted_8band_monthcomp"
   write.csv(df_spectra_omnbr_zscaled_wide,
-            paste0(outpath, "/zscaled/tree_points_elegant_8b_spectra_zscaled_2week_idset", idset, ".csv"),
+            paste0(outpath, "/zscaled/tree_points_8b_spectra_zscaled_monthcomp_idset", idset, ".csv"),
             row.names = FALSE)
   write.csv(df_spectra_omnbr_wide,
-            paste0(outpath, "/raw/tree_points_elegant_8b_spectra_raw_2week_idset", idset, ".csv"),
+            paste0(outpath, "/raw/tree_points_8b_spectra_raw_monthcomp_idset", idset, ".csv"),
             row.names = FALSE)
   print(Sys.time() - start_time)
 }
