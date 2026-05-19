@@ -237,11 +237,11 @@ for (idset in 1:length(step_ranges)){
 
 for (n_weeks_ts in c(1, 2, 4, 8)){
   
+  n_weeks_ts <- 1
+  
   setwd(paste0("/Volumes/NYC_geo/tree_classification/extracted_timeranges/median/single_years/", n_weeks_ts, "week/"))
   rds_files <- list.files()
   all_single_year <- purrr::map(rds_files, readRDS) %>% list_rbind()
-  
-  #n_weeks_ts <- 1
   
   all_single_year$doy <- str_split(all_single_year$Date_Range_Group, "_") %>% lapply('[[', 2) %>% ymd() %>% yday()
   timerange_label <- str_split(all_single_year$Date_Range_Group[1], "_")[[1]][1]
@@ -255,7 +255,7 @@ for (n_weeks_ts in c(1, 2, 4, 8)){
   for (i in 1:length(unique_doy)){
     print(i)
     #i <- 1
-    
+    unique_doy_inds <- which(all_single_year$doy == unique_doy[i])
     all_collapsed_year_sub <- aggregate(all_single_year[unique_doy_inds,band_list], by = list(all_single_year$Object_ID[unique_doy_inds], all_single_year$doy[unique_doy_inds]), FUN = agg_fun, na.rm = TRUE) 
     all_collapsed_year_img_sums_sub <- aggregate(all_single_year$n_img_days_num[unique_doy_inds], by = list(all_single_year$Object_ID[unique_doy_inds], all_single_year$doy[unique_doy_inds]), FUN = "sum", na.rm = TRUE) 
     all_collapsed_year_sub$n_img_counts_sum <- all_collapsed_year_img_sums_sub$x
