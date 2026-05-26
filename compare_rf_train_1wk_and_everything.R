@@ -165,10 +165,11 @@ sort(rf_trained_everything$variable.importance, decreasing = TRUE)[1:15]
 # This is the maximum
 max_cols_1wk <- max.col(genus_var_imp_1wk[,2:ncol(genus_var_imp_1wk)]) + 1
 colnames(genus_var_imp_1wk)[max_cols_1wk]
-max_vals <- as.matrix(genus_var_imp[,..max_cols]) %>% diag() # these are the importance values
+max_vals_1wk <- as.matrix(genus_var_imp_1wk[,..max_cols_1wk]) %>% diag() # these are the importance values
 
 max_cols_everything <- max.col(genus_var_imp_everything[,2:ncol(genus_var_imp_everything)]) + 1
 colnames(genus_var_imp_everything)[max_cols_everything]
+max_vals_everything <- as.matrix(genus_var_imp_everything[,..max_cols_everything]) %>% diag() # these are the importance values
 
 genus_var_imp_everything_df <- data.frame(genus_var_imp_everything$genus, colnames(genus_var_imp_everything)[max_cols_everything])
 colnames(genus_var_imp_everything_df) <- c("genus", "MaxImp_everything")
