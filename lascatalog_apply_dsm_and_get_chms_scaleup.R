@@ -339,3 +339,48 @@ merge(rastcoll, method = "nearest",
 
 # test read in
 chm <- rast('/Volumes/NYC_geo/nyc_lidar_metrics/treeheightfilt_min6p56ft_raster_minzero_1p64ft_scaled_mosaic.tif')
+
+# 2026 10 07
+# New mosaic with uchmbt files
+setwd("/Volumes/NYC_geo/processing_temporary/")
+#file_prefix <- "treeheightfilt_min6p56ft_minzero_raster_1p64ft"
+file_prefix <- "uchmbt_raster_1p64ft"
+file_list <- list.files(pattern = glob2rx(paste0(file_prefix, "*")))
+rastcoll <- sprc(file_list)
+merge(rastcoll[1:200], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_1_200_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[201:400], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_201_400_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[401:600], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_401_600_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[601:800], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_601_800_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[801:1000], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_801_1000_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[1001:1200], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_1001_1200_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[1201:1400], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_1201_1400_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[1401:1600], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_1401_1600_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+merge(rastcoll[1601:1702], method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "_scaled_1601_1702_mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
+
+# now merge all these together into one big mosaic
+setwd("/Volumes/NYC_geo/nyc_lidar_metrics/")
+#file_prefix <- "treeheightfilt_min6p56ft_minzero_raster_1p64ft_scaled_"
+file_prefix <- "uchmbt_raster_1p64ft_"
+file_list <- list.files(pattern = glob2rx(paste0(file_prefix, "*")))
+rastcoll <- sprc(file_list)
+merge(rastcoll, method = "nearest",
+      filename = paste0("/Volumes/NYC_geo/nyc_lidar_metrics/", file_prefix, "mosaic.tif"),
+      scale = 0.01, datatype = "INT4S", overwrite = TRUE)
